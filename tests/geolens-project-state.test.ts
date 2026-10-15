@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { afterEach, describe, it } from "node:test";
 import {
   PUBLISHABLE_PLUGIN_SETTINGS,
@@ -99,6 +100,50 @@ describe("GeoLens plugin project state", () => {
     setGeoLensProjectState(saved);
     getGeoLensProjectState().layerKeys["layer-1"] = "changed";
     assert.equal(getGeoLensProjectState().layerKeys["layer-1"], DATASET_KEY);
+  });
+});
+
+describe("layer key mapping", () => {
+  const base = { serverUrl: saved.serverUrl, mapKey: MAP_KEY };
+
+  it("keeps a layer id named __proto__ as data", () => {
+    const layerKeys = JSON.parse(`{"__proto__": "${DATASET_KEY}", "layer-1": "${DATASET_KEY}"}`);
+    const state = normalizeGeoLensProjectState({ ...base, layerKeys });
+    assert.deepEqual(Object.keys(state.layerKeys).sort(), ["__proto__", "layer-1"]);
+    assert.equal(Object.getPrototypeOf(state.layerKeys), Object.prototype);
+    setGeoLensProjectState({ ...base, layerKeys });
+    assert.equal(getGeoLensProjectState().layerKeys["__proto__"], DATASET_KEY);
+  });
+
+  it("drops layer ids that are empty or too long", () => {
+    const state = normalizeGeoLensProjectState({
+      ...base,
+      layerKeys: { "": DATASET_KEY, ["x".repeat(257)]: DATASET_KEY, ok: DATASET_KEY },
+    });
+    assert.deepEqual(Object.keys(state.layerKeys), ["ok"]);
+  });
+
+  it("keeps at most 500 entries", () => {
+    const layerKeys = Object.fromEntries(
+      Array.from({ length: 600 }, (_, i) => [`layer-${i}`, DATASET_KEY]),
+    );
+    const state = normalizeGeoLensProjectState({ ...base, layerKeys });
+    assert.equal(Object.keys(state.layerKeys).length, 500);
+    assert.ok("layer-0" in state.layerKeys);
+  });
+});
+
+describe("Python mirror of the publishable sub-keys", () => {
+  it("lists the same sub-keys as the TypeScript entry and the state module", () => {
+    const source = readFileSync(
+      new URL("../python/src/geolibre/project.py", import.meta.url),
+      "utf8",
+    );
+    const match = /"maplibre-gl-geolens": \(([^)]*)\)/.exec(source);
+    assert.ok(match, "the Python entry is missing");
+    const python = [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+    assert.deepEqual(python, [...GEOLENS_PROJECT_STATE_KEYS]);
+    assert.deepEqual(PUBLISHABLE_PLUGIN_SETTINGS[GEOLENS_PLUGIN_ID], python);
   });
 });
 

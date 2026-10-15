@@ -24,6 +24,15 @@ export const GEOLENS_PROJECT_STATE_KEYS = ["serverUrl", "mapKey", "layerKeys"] a
 // The shape the manifest schema accepts for a key.
 const PUBLISH_KEY_RE = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 
+// A project has far fewer layers than this; the bounds keep a hand-edited file
+// from filling the saved state.
+const MAX_LAYER_KEYS = 500;
+const MAX_LAYER_ID_LENGTH = 256;
+
+function isLayerId(value: string): boolean {
+  return value.length > 0 && value.length <= MAX_LAYER_ID_LENGTH;
+}
+
 let state: GeoLensProjectState = emptyState();
 
 function emptyState(): GeoLensProjectState {
@@ -59,12 +68,15 @@ function cleanServerUrl(value: unknown): string {
  */
 export function normalizeGeoLensProjectState(value: unknown): GeoLensProjectState {
   if (!isRecord(value)) return emptyState();
-  const layerKeys: Record<string, string> = {};
-  if (isRecord(value.layerKeys)) {
-    for (const [layerId, key] of Object.entries(value.layerKeys)) {
-      if (isPublishKey(key)) layerKeys[layerId] = key;
-    }
-  }
+  // fromEntries defines own properties, so a layer id such as "__proto__" is
+  // kept as data instead of setting the prototype.
+  const layerKeys: Record<string, string> = isRecord(value.layerKeys)
+    ? Object.fromEntries(
+        Object.entries(value.layerKeys)
+          .filter(([layerId, key]) => isLayerId(layerId) && isPublishKey(key))
+          .slice(0, MAX_LAYER_KEYS) as [string, string][],
+      )
+    : {};
   // Publish keys belong to one server, so without a valid URL there is nothing
   // to remember.
   const serverUrl = cleanServerUrl(value.serverUrl);
